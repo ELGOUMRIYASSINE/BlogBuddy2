@@ -1,0 +1,522 @@
+// server/index.ts
+import express2 from "express";
+import session from "express-session";
+
+// server/routes.ts
+import { createServer } from "http";
+
+// server/storage.ts
+var MemStorage = class {
+  users;
+  posts;
+  categories;
+  currentUserId;
+  currentPostId;
+  currentCategoryId;
+  constructor() {
+    this.users = /* @__PURE__ */ new Map();
+    this.posts = /* @__PURE__ */ new Map();
+    this.categories = /* @__PURE__ */ new Map();
+    this.currentUserId = 1;
+    this.currentPostId = 1;
+    this.currentCategoryId = 1;
+    this.createUser({ username: "admin", password: process.env.ADMIN_PASSWORD || "admin123" });
+    this.initializeDefaultData();
+  }
+  async initializeDefaultData() {
+    const defaultCategories = ["Technology", "Lifestyle", "Design", "Business"];
+    for (const categoryName of defaultCategories) {
+      await this.createCategory({ name: categoryName });
+    }
+    const samplePosts = [
+      {
+        title: "The Future of Web Development in 2025",
+        excerpt: "Exploring the latest trends and technologies that will shape web development in the coming year.",
+        content: "Web development continues to evolve at a rapid pace. In 2025, we're seeing exciting developments in AI-powered development tools, serverless architectures, and new JavaScript frameworks.\n\nThe rise of AI assistants in coding has transformed how developers approach problem-solving. These tools can generate code snippets, debug issues, and even suggest architectural improvements.\n\nServerless computing has matured significantly, offering developers the ability to build scalable applications without managing infrastructure. This shift allows teams to focus more on business logic and user experience.\n\nNew frameworks continue to emerge, each addressing specific pain points in modern development. The emphasis is on developer experience, performance, and maintainability.",
+        author: "Alex Johnson",
+        category: "Technology",
+        imageUrl: "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=800&h=400&fit=crop",
+        published: true
+      },
+      {
+        title: "Building Healthy Work-Life Balance as a Remote Developer",
+        excerpt: "Practical tips for maintaining productivity and well-being while working from home.",
+        content: "Remote work has become the norm for many developers, but it comes with unique challenges. Maintaining a healthy work-life balance requires intentional strategies and boundaries.\n\nCreating a dedicated workspace helps establish mental boundaries between work and personal time. Even in small apartments, having a specific area for work can make a significant difference.\n\nEstablishing regular hours and sticking to them prevents work from bleeding into personal time. It's tempting to 'just fix one more bug' but this can lead to burnout.\n\nTaking regular breaks, exercising, and maintaining social connections are crucial for long-term success and happiness in remote work environments.",
+        author: "Sarah Chen",
+        category: "Lifestyle",
+        imageUrl: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=800&h=400&fit=crop",
+        published: true
+      },
+      {
+        title: "Modern UI Design Principles for 2025",
+        excerpt: "Key design principles and trends that are shaping user interface design this year.",
+        content: "User interface design continues to evolve, with 2025 bringing fresh perspectives on usability, accessibility, and aesthetic appeal.\n\nMinimalism remains strong, but with more emphasis on meaningful interactions and micro-animations that guide users through interfaces. The goal is to create experiences that feel both simple and engaging.\n\nAccessibility is no longer an afterthought but a core design principle. Designers are creating interfaces that work for users with diverse abilities and needs from the ground up.\n\nColor psychology and typography are being used more strategically to create emotional connections with users while maintaining excellent readability and usability across all devices.",
+        author: "Maria Rodriguez",
+        category: "Design",
+        imageUrl: "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=800&h=400&fit=crop",
+        published: true
+      },
+      {
+        title: "Scaling Your Tech Startup: Lessons from the Trenches",
+        excerpt: "Real-world insights on growing a technology startup from MVP to market leader.",
+        content: "Scaling a tech startup requires more than just great code \u2013 it demands strategic thinking, team building, and careful resource management.\n\nThe journey from MVP to product-market fit is often longer than anticipated. It's crucial to stay close to your customers and iterate based on real feedback rather than assumptions.\n\nBuilding the right team at the right time is critical. Hiring too fast can strain resources, while hiring too slow can limit growth opportunities. Focus on finding people who align with your company values and can grow with the organization.\n\nTechnical debt becomes a real challenge as you scale. Investing in proper architecture and development practices early on saves significant time and resources later in the journey.",
+        author: "David Kim",
+        category: "Business",
+        imageUrl: "https://images.unsplash.com/photo-1559136555-9303baea8ebd?w=800&h=400&fit=crop",
+        published: true
+      }
+    ];
+    for (const postData of samplePosts) {
+      await this.createPost(postData);
+    }
+  }
+  generateSlug(title) {
+    return title.toLowerCase().replace(/[^a-z0-9 -]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").trim();
+  }
+  // User methods
+  async getUser(id) {
+    return this.users.get(id);
+  }
+  async getUserByUsername(username) {
+    return Array.from(this.users.values()).find(
+      (user) => user.username === username
+    );
+  }
+  async createUser(insertUser) {
+    const id = this.currentUserId++;
+    const user = { ...insertUser, id };
+    this.users.set(id, user);
+    return user;
+  }
+  // Post methods
+  async getAllPosts() {
+    return Array.from(this.posts.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }
+  async getPostById(id) {
+    return this.posts.get(id);
+  }
+  async getPostBySlug(slug) {
+    return Array.from(this.posts.values()).find((post) => post.slug === slug);
+  }
+  async getPostsByCategory(category) {
+    return Array.from(this.posts.values()).filter((post) => post.category.toLowerCase() === category.toLowerCase()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+  async searchPosts(query) {
+    const lowercaseQuery = query.toLowerCase();
+    return Array.from(this.posts.values()).filter(
+      (post) => post.title.toLowerCase().includes(lowercaseQuery) || post.excerpt.toLowerCase().includes(lowercaseQuery) || post.content.toLowerCase().includes(lowercaseQuery)
+    ).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+  async createPost(insertPost) {
+    const id = this.currentPostId++;
+    const slug = this.generateSlug(insertPost.title);
+    const now = /* @__PURE__ */ new Date();
+    const post = {
+      id,
+      title: insertPost.title,
+      slug,
+      excerpt: insertPost.excerpt,
+      content: insertPost.content,
+      author: insertPost.author,
+      category: insertPost.category,
+      imageUrl: insertPost.imageUrl || null,
+      published: insertPost.published !== void 0 ? insertPost.published : true,
+      createdAt: now,
+      updatedAt: now
+    };
+    this.posts.set(id, post);
+    await this.updateCategoryPostCount(post.category, 1);
+    return post;
+  }
+  async updatePost(id, updateData) {
+    const existingPost = this.posts.get(id);
+    if (!existingPost) return void 0;
+    const updatedPost = {
+      ...existingPost,
+      ...updateData,
+      slug: updateData.title ? this.generateSlug(updateData.title) : existingPost.slug,
+      updatedAt: /* @__PURE__ */ new Date()
+    };
+    this.posts.set(id, updatedPost);
+    return updatedPost;
+  }
+  async deletePost(id) {
+    const post = this.posts.get(id);
+    if (!post) return false;
+    this.posts.delete(id);
+    await this.updateCategoryPostCount(post.category, -1);
+    return true;
+  }
+  async getPopularPosts(limit = 3) {
+    const allPosts = await this.getAllPosts();
+    return allPosts.slice(0, limit);
+  }
+  // Category methods
+  async getAllCategories() {
+    return Array.from(this.categories.values());
+  }
+  async createCategory(insertCategory) {
+    const id = this.currentCategoryId++;
+    const category = {
+      ...insertCategory,
+      id,
+      postCount: 0
+    };
+    this.categories.set(id, category);
+    return category;
+  }
+  async updateCategoryPostCount(categoryName, increment) {
+    const category = Array.from(this.categories.values()).find(
+      (cat) => cat.name.toLowerCase() === categoryName.toLowerCase()
+    );
+    if (category) {
+      category.postCount = Math.max(0, category.postCount + increment);
+      this.categories.set(category.id, category);
+    }
+  }
+};
+var storage = new MemStorage();
+
+// shared/schema.ts
+import { pgTable, text, serial, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+var users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull()
+});
+var posts = pgTable("posts", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  slug: text("slug").notNull().unique(),
+  excerpt: text("excerpt").notNull(),
+  content: text("content").notNull(),
+  author: text("author").notNull(),
+  category: text("category").notNull(),
+  imageUrl: text("image_url"),
+  published: boolean("published").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow()
+});
+var categories = pgTable("categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  postCount: integer("post_count").notNull().default(0)
+});
+var insertUserSchema = createInsertSchema(users).omit({
+  id: true
+});
+var insertPostSchema = createInsertSchema(posts).omit({
+  id: true,
+  slug: true,
+  createdAt: true,
+  updatedAt: true
+});
+var insertCategorySchema = createInsertSchema(categories).omit({
+  id: true,
+  postCount: true
+});
+
+// server/routes.ts
+import { z } from "zod";
+async function registerRoutes(app2) {
+  app2.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ message: "Username and password required" });
+      }
+      const user = await storage.getUserByUsername(username);
+      if (!user || user.password !== password) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      req.session.userId = user.id;
+      req.session.isAdmin = true;
+      res.json({ success: true, user: { id: user.id, username: user.username } });
+    } catch (error) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+  app2.post("/api/auth/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ message: "Could not log out" });
+      }
+      res.json({ success: true });
+    });
+  });
+  app2.get("/api/auth/me", (req, res) => {
+    const session2 = req.session;
+    if (session2?.userId && session2?.isAdmin) {
+      res.json({ isAuthenticated: true, userId: session2.userId });
+    } else {
+      res.status(401).json({ isAuthenticated: false });
+    }
+  });
+  const requireAdmin = (req, res, next) => {
+    const session2 = req.session;
+    if (!session2?.userId || !session2?.isAdmin) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+    next();
+  };
+  app2.get("/api/posts", async (req, res) => {
+    try {
+      const { category, search } = req.query;
+      let posts2;
+      if (search) {
+        posts2 = await storage.searchPosts(search);
+      } else if (category) {
+        posts2 = await storage.getPostsByCategory(category);
+      } else {
+        posts2 = await storage.getAllPosts();
+      }
+      res.json(posts2);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch posts" });
+    }
+  });
+  app2.get("/api/posts/:slug", async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const post = await storage.getPostBySlug(slug);
+      if (!post) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      res.json(post);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch post" });
+    }
+  });
+  app2.get("/api/posts/popular", async (req, res) => {
+    try {
+      const posts2 = await storage.getPopularPosts(3);
+      res.json(posts2);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch popular posts" });
+    }
+  });
+  app2.post("/api/admin/posts", requireAdmin, async (req, res) => {
+    try {
+      const validatedData = insertPostSchema.parse(req.body);
+      const post = await storage.createPost(validatedData);
+      res.status(201).json(post);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid post data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to create post" });
+    }
+  });
+  app2.put("/api/admin/posts/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const validatedData = insertPostSchema.partial().parse(req.body);
+      const post = await storage.updatePost(id, validatedData);
+      if (!post) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      res.json(post);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid post data", errors: error.errors });
+      }
+      res.status(500).json({ message: "Failed to update post" });
+    }
+  });
+  app2.delete("/api/admin/posts/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const deleted = await storage.deletePost(id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete post" });
+    }
+  });
+  app2.get("/api/categories", async (req, res) => {
+    try {
+      const categories2 = await storage.getAllCategories();
+      res.json(categories2);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch categories" });
+    }
+  });
+  const httpServer = createServer(app2);
+  return httpServer;
+}
+
+// server/vite.ts
+import express from "express";
+import fs from "fs";
+import path2 from "path";
+import { createServer as createViteServer, createLogger } from "vite";
+
+// vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+var vite_config_default = defineConfig({
+  plugins: [
+    react(),
+    runtimeErrorOverlay(),
+    ...process.env.NODE_ENV !== "production" && process.env.REPL_ID !== void 0 ? [
+      await import("@replit/vite-plugin-cartographer").then(
+        (m) => m.cartographer()
+      )
+    ] : []
+  ],
+  resolve: {
+    alias: {
+      "@": path.resolve(import.meta.dirname, "client", "src"),
+      "@shared": path.resolve(import.meta.dirname, "shared"),
+      "@assets": path.resolve(import.meta.dirname, "attached_assets")
+    }
+  },
+  root: path.resolve(import.meta.dirname, "client"),
+  build: {
+    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    emptyOutDir: true
+  },
+  server: {
+    fs: {
+      strict: true,
+      deny: ["**/.*"]
+    }
+  }
+});
+
+// server/vite.ts
+import { nanoid } from "nanoid";
+var viteLogger = createLogger();
+function log(message, source = "express") {
+  const formattedTime = (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
+async function setupVite(app2, server) {
+  const serverOptions = {
+    middlewareMode: true,
+    hmr: { server },
+    allowedHosts: true
+  };
+  const vite = await createViteServer({
+    ...vite_config_default,
+    configFile: false,
+    customLogger: {
+      ...viteLogger,
+      error: (msg, options) => {
+        viteLogger.error(msg, options);
+        process.exit(1);
+      }
+    },
+    server: serverOptions,
+    appType: "custom"
+  });
+  app2.use(vite.middlewares);
+  app2.use("*", async (req, res, next) => {
+    const url = req.originalUrl;
+    try {
+      const clientTemplate = path2.resolve(
+        import.meta.dirname,
+        "..",
+        "client",
+        "index.html"
+      );
+      let template = await fs.promises.readFile(clientTemplate, "utf-8");
+      template = template.replace(
+        `src="/src/main.tsx"`,
+        `src="/src/main.tsx?v=${nanoid()}"`
+      );
+      const page = await vite.transformIndexHtml(url, template);
+      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      next(e);
+    }
+  });
+}
+function serveStatic(app2) {
+  const distPath = path2.resolve(import.meta.dirname, "public");
+  if (!fs.existsSync(distPath)) {
+    throw new Error(
+      `Could not find the build directory: ${distPath}, make sure to build the client first`
+    );
+  }
+  app2.use(express.static(distPath));
+  app2.use("*", (_req, res) => {
+    res.sendFile(path2.resolve(distPath, "index.html"));
+  });
+}
+
+// server/index.ts
+var app = express2();
+app.use(express2.json());
+app.use(express2.urlencoded({ extended: false }));
+app.use(session({
+  secret: "blog-secret-key-12345",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: false,
+    // Set to true in production with HTTPS
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1e3
+    // 24 hours
+  }
+}));
+app.use((req, res, next) => {
+  const start = Date.now();
+  const path3 = req.path;
+  let capturedJsonResponse = void 0;
+  const originalResJson = res.json;
+  res.json = function(bodyJson, ...args) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
+  };
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    if (path3.startsWith("/api")) {
+      let logLine = `${req.method} ${path3} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+      if (logLine.length > 80) {
+        logLine = logLine.slice(0, 79) + "\u2026";
+      }
+      log(logLine);
+    }
+  });
+  next();
+});
+(async () => {
+  const server = await registerRoutes(app);
+  app.use((err, _req, res, _next) => {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+    res.status(status).json({ message });
+    throw err;
+  });
+  if (app.get("env") === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
+  const port = 5e3;
+  server.listen({
+    port,
+    host: "0.0.0.0",
+    reusePort: true
+  }, () => {
+    log(`serving on port ${port}`);
+  });
+})();
