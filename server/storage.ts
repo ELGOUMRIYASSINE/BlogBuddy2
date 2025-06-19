@@ -40,7 +40,7 @@ export class MemStorage implements IStorage {
     this.currentCategoryId = 1;
 
     // Initialize with default admin user
-    this.createUser({ username: "admin", password: "admin123" });
+    this.createUser({ username: "admin", password: process.env.ADMIN_PASSWORD || "admin123" });
 
     // Initialize default categories
     this.initializeDefaultData();
